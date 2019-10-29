@@ -1,14 +1,9 @@
-# demographics 
-Demographic analysis related to housing development and housing policy
-Forecast 80+ population by MSA for 2025 and 2035
+## Demographics 
+## Demographic analysis related to housing development and housing policy
+## Calculates Forecast 80+ population by MSA for 2025 and 2035 utizing Hamilton-Perry method
 
-
-R script projecting the growth in senior housing in the U.S. 
-Source data includes publically available US Census population data and proprietary unit inventory data from the American Association of Senior Housing (ASHA)
-
-Most variable names align with US Census labels.
-
-Opportunities for improvement include:
-.. identifying/creating open source/non·proprietary source for unit supply information
-.. converting to five-year intevals (v. 10-year intervals)
-
+## Companion document to American Senior Housing Association (ASHA) Special Issues Brief (SIB) titled "Revisiting Senior Living Long-Term Unit Growth Forecast" by Francesco Rockwood (Fall 2019)
+## This R script employs Hamilton-Perry method to forecast population by age-cohort by metropolitan statistical areas (MSA)
+## There are numerous opportunities to improve this script such as
+## ... creation of a function to handle Hamilton-Perry calcuations
+## ... more systematic treatment of converting data types
