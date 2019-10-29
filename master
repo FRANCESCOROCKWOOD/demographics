@@ -7,7 +7,7 @@
 
 ## Set local environment
 rm(list=ls())
-setwd("C:/Users/FrankRockwood/OneDrive - Rockwood Pacific Inc/FIRM/_FIRM_A-E/ASHA/2019_DEMAND_STUDY/Data")
+##setwd("...")
 list.files()
 
 ## Script relies heavily on .tidyverse packages
