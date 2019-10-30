@@ -1,7 +1,7 @@
 ## Companion document to American Senior Housing Association (ASHA) Special Issues Brief (SIB) titled "Revisiting Senior Living Long-Term Unit Growth Forecast" by Francesco Rockwood (Fall 2019)
 ## This R script employs Hamilton-Perry method to forecast population by age-cohort by metropolitan statistical areas (MSA)
 ## There are numerous opportunities to improve this script such as
-## ... creation of a function to handle Hamilton-Perry calcuations
+## ... numerous opportunities to create functions (data cleaning, Hamilton-Perry calcuations, charting, etc.)
 ## ... more systematic treatment of converting data types
 
 
@@ -30,7 +30,6 @@ library(reshape2)
 ## https://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_17_1YR_S0101&prodType=table
 
 
-## Prior to import, manually changed LAX code to 31080 for 2010 and 2005; for future iteration, will treat similarly to adjustments for Honolulu, Sararota, and Vero Beach
 MSA_POP_2017 <- read.csv("ACS_17_1YR_S0101.csv")
 MSA_POP_2015 <- read.csv("ACS_15_1YR_S0101.csv")
 MSA_POP_2010 <- read.csv("ACS_10_1YR_S0101.csv")
@@ -43,7 +42,6 @@ MSA_POP_2010$GEO.id2 <- as.factor(MSA_POP_2010$GEO.id2)
 MSA_POP_2015$GEO.id2 <- as.factor(MSA_POP_2015$GEO.id2)
 MSA_POP_2017$GEO.id2 <- as.factor(MSA_POP_2017$GEO.id2)
 
-## Align 2005 MSA codes with 2017
 ## Change GEO.id2 (CBSA code) for Los Angeles, Honolulu, Sarasota and Vero Beach in 2005 dataset to align with 2017 code
 levels(MSA_POP_2005$GEO.id2) <- c(levels(MSA_POP_2005$GEO.id2), c("31080","35840","42680","46520"))
 MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="31100"]<-"31080"  ## Los Angeles
@@ -51,7 +49,6 @@ MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="42260"]<-"35840"  ## Sarasota / Nort
 MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="46940"]<-"42680"  ## Vero Beach / Sebatian
 MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="26180"]<-"46520"  ## Honolulu
 
-## Align 2010 MSA codes with 2017
 ## Change GEO.id2 for Los Angeles, Honolulu in 2010 dataset to align with 2017 code
 levels(MSA_POP_2010$GEO.id2) <- c(levels(MSA_POP_2010$GEO.id2), c("31080","46520"))
 MSA_POP_2010$GEO.id2[MSA_POP_2010$GEO.id2=="31100"]<-"31080"  ## Los Angeles
