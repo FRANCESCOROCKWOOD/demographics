@@ -1,0 +1,979 @@
+## Companion document to American Senior Housing Association (ASHA) Special Issues Brief (SIB) titled "Revisiting Senior Living Long-Term Unit Growth Forecast" by Francesco Rockwood (Fall 2019)
+## This R script employs Hamilton-Perry method to forecast population by age-cohort by metropolitan statistical areas (MSA)
+## There are numerous opportunities to improve this script such as
+## ... numerous opportunities to create functions (data cleaning, Hamilton-Perry calcuations, charting)
+## ... more systematic treatment of converting data types
+
+########################
+## Set local environment
+########################
+
+rm(list=ls())
+## setwd("...")
+list.files()
+
+## Script relies heavily on .tidyverse packages
+install.packages("mdsr") ## package of packages based on Modern Data Sciences with R book by B. Baumer, D. Kaplan and N Horton
+install.packages("backports") ## some issues initial installation of backports and broom; 
+install.packages("broom") 
+library(plyr)
+library(mdsr)
+library(tidyr)
+library(mosaic)
+library(RColorBrewer)
+library(reshape2)
+
+
+
+###########################
+## Imort data
+###########################
+
+## MSA Populaton SOURCE 
+## US Census; American Community Survey (ACS), S0101 (AGE AND SEX); 1-year estimates: 2005, 2010, 2015, 2017
+## GEO.ID is CBSA 
+## Selected Macro/micro statistical areas -310
+## Includes all Macro/Micro in the US (excludes Puerto Rico)
+## https://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?pid=ACS_17_1YR_S0101&prodType=table
+## Applicable population data fields are:
+## GEO.id	Id
+## GEO.display-label	Geography
+## HC01_EST_VC01	Total; Estimate; Total population
+## HC01_EST_VC03	Total; Estimate; AGE - Under 5 years
+## HC01_EST_VC04	Total; Estimate; AGE - 5 to 9 years
+## HC01_EST_VC05	Total; Estimate; AGE - 10 to 14 years
+## HC01_EST_VC06	Total; Estimate; AGE - 15 to 19 years
+## HC01_EST_VC07	Total; Estimate; AGE - 20 to 24 years
+## HC01_EST_VC08	Total; Estimate; AGE - 25 to 29 years
+## HC01_EST_VC09	Total; Estimate; AGE - 30 to 34 years
+## HC01_EST_VC10	Total; Estimate; AGE - 35 to 39 years
+## HC01_EST_VC11	Total; Estimate; AGE - 40 to 44 years
+## HC01_EST_VC12	Total; Estimate; AGE - 45 to 49 years
+## HC01_EST_VC13	Total; Estimate; AGE - 50 to 54 years
+## HC01_EST_VC14	Total; Estimate; AGE - 55 to 59 years
+## HC01_EST_VC15	Total; Estimate; AGE - 60 to 64 years
+## HC01_EST_VC16	Total; Estimate; AGE - 65 to 69 years
+## HC01_EST_VC17	Total; Estimate; AGE - 70 to 74 years
+## HC01_EST_VC18	Total; Estimate; AGE - 75 to 79 years
+## HC01_EST_VC19	Total; Estimate; AGE - 80 to 84 years
+## HC01_EST_VC20	Total; Estimate; AGE - 85 years and over
+
+
+MSA_POP_2017 <- read.csv("ACS_17_1YR_S0101.csv")
+MSA_POP_2015 <- read.csv("ACS_15_1YR_S0101.csv")
+MSA_POP_2010 <- read.csv("ACS_10_1YR_S0101.csv") 
+MSA_POP_2005 <- read.csv("ACS_05_EST_S0101_with_ann.csv")[-1,]  
+
+
+## Convert Geo.id2 to factor
+MSA_POP_2005$GEO.id2 <- as.factor(MSA_POP_2005$GEO.id2)
+MSA_POP_2010$GEO.id2 <- as.factor(MSA_POP_2010$GEO.id2)
+MSA_POP_2015$GEO.id2 <- as.factor(MSA_POP_2015$GEO.id2)
+MSA_POP_2017$GEO.id2 <- as.factor(MSA_POP_2017$GEO.id2)
+
+## Change GEO.id2 (CBSA code) for Los Angeles, Honolulu, Sarasota and Vero Beach in 2005 dataset to align with 2017 GEO.id2 code
+levels(MSA_POP_2005$GEO.id2) <- c(levels(MSA_POP_2005$GEO.id2), c("31080","35840","42680","46520"))
+MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="31100"]<-"31080"  ## Los Angeles
+MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="42260"]<-"35840"  ## Sarasota / North Sarasota
+MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="46940"]<-"42680"  ## Vero Beach / Sebatian
+MSA_POP_2005$GEO.id2[MSA_POP_2005$GEO.id2=="26180"]<-"46520"  ## Honolulu
+
+## Change GEO.id2 for Los Angeles, Honolulu in 2010 dataset to align with 2017 GEO.id2 code
+levels(MSA_POP_2010$GEO.id2) <- c(levels(MSA_POP_2010$GEO.id2), c("31080","46520"))
+MSA_POP_2010$GEO.id2[MSA_POP_2010$GEO.id2=="31100"]<-"31080"  ## Los Angeles
+MSA_POP_2010$GEO.id2[MSA_POP_2010$GEO.id2=="26180"]<-"46520"  ## Honolulu
+
+
+
+## UNIT SUPPLY SOURCE
+## ASHA Constuction Monitor Series; report based in part on data licensed by ASHA from NIC.
+## Note that this is propriety data source; the key data points are number of senior housing units by category
+## Construction Monitor reports scrapped into .cvs file with Geo.ID from ACS files above 
+## Matching of supply data with ACS CBSA based on market description
+## Remove Porterville, CA and The Villages, FL (not clear which CBSA corresponds to these markets)
+## Remove "%" from penetration fields (specific to formating of supply data source)
+
+MSA_SUPPLY_2019 <- read.csv("ASHA_Construction_2019.csv") 
+MSA_SUPPLY_2017 <- read.csv("ASHA_Construction_2017.csv")
+MSA_SUPPLY_2015 <- read.csv("ASHA_Construction_2015.csv")
+
+MSA_SUPPLY_2019  <- MSA_SUPPLY_2019 %>%
+  filter(MSA!="Porterville, CA ") %>%
+  filter(MSA!="The Villages, FL ") %>%
+  mutate(CCRC_Inv_Penetration=as.numeric(sub("%","",CCRC_Inv_Penetration))/100) %>%
+  mutate(IL_Inv_Penetration=as.numeric(sub("%","",IL_Inv_Penetration))/100) %>%
+  mutate(AL_Inv_Penetration=as.numeric(sub("%","",AL_Inv_Penetration))/100) %>%
+  mutate(MC_Inv_Penetration=as.numeric(sub("%","",MC_Inv_Penetration))/100) %>%
+  mutate(NC_Inv_Penetration=as.numeric(sub("%","",NC_Inv_Penetration))/100) 
+
+MSA_SUPPLY_2017  <- MSA_SUPPLY_2017 %>%
+  filter(MSA!="Porterville, CA ") %>%
+  filter(MSA!="The Villages, FL ") %>%
+  mutate(CCRC_Inv_Penetration=as.numeric(sub("%","",CCRC_Inv_Penetration))/100) %>%
+  mutate(IL_Inv_Penetration=as.numeric(sub("%","",IL_Inv_Penetration))/100) %>%
+  mutate(AL_Inv_Penetration=as.numeric(sub("%","",AL_Inv_Penetration))/100) %>%
+  mutate(MC_Inv_Penetration=as.numeric(sub("%","",MC_Inv_Penetration))/100) %>%
+  mutate(NC_Inv_Penetration=as.numeric(sub("%","",NC_Inv_Penetration))/100) 
+  
+MSA_SUPPLY_2015  <- MSA_SUPPLY_2015 %>%
+  filter(MSA!="Porterville, CA ") %>%
+  filter(MSA!="The Villages, FL ") %>%
+  mutate(CCRC_Inv_Penetration=as.numeric(sub("%","",CCRC_Inv_Penetration))/100) %>%
+  mutate(IL_Inv_Penetration=as.numeric(sub("%","",IL_Inv_Penetration))/100) %>%
+  mutate(AL_Inv_Penetration=as.numeric(sub("%","",AL_Inv_Penetration))/100) %>%
+  mutate(MC_Inv_Penetration=as.numeric(sub("%","",MC_Inv_Penetration))/100) %>%
+  mutate(NC_Inv_Penetration=as.numeric(sub("%","",NC_Inv_Penetration))/100)   
+
+
+
+############################################
+## Clean population data / create new fields
+############################################
+
+
+## Join MSA population datasets
+## Keep full details for 2005, 2010 and 2015 (not 2017)
+## Create variable set (numeric) for 2005 and 2015 age-cohorts; source figures in percentage * 100
+## Calculateannualized growth rates
+## Set Growth_Forecast to the greater of annual growth between 2010:2017 and 2005:2017
+## Future population estimates (for all cohorts) based on applying Growth_Forecast to 2017 population
+## Add variables for POP and POP80PLUS
+MSA_MASTER <- MSA_POP_2017 %>%
+  mutate(POP2017 =as.numeric(as.character(HC01_EST_VC01))) %>%
+  select(GEO.id2, POP2017) %>%
+  
+  inner_join(MSA_POP_2005, by=c("GEO.id2", "GEO.id2"))%>% 
+  mutate(POP2005 =as.numeric(as.character(HC01_EST_VC01))) %>%
+  mutate(HC01_EST_VC20_2005 =as.numeric(as.character(HC01_EST_VC20))) %>%
+  mutate(HC01_EST_VC19_2005 =as.numeric(as.character(HC01_EST_VC19))) %>% 
+  mutate(HC01_EST_VC18_2005 =as.numeric(as.character(HC01_EST_VC18))) %>% 
+  mutate(HC01_EST_VC17_2005 =as.numeric(as.character(HC01_EST_VC17))) %>%
+  mutate(HC01_EST_VC16_2005 =as.numeric(as.character(HC01_EST_VC16))) %>% 
+  mutate(HC01_EST_VC15_2005 =as.numeric(as.character(HC01_EST_VC15))) %>%  
+  mutate(HC01_EST_VC14_2005 =as.numeric(as.character(HC01_EST_VC14))) %>%
+  mutate(HC01_EST_VC13_2005 =as.numeric(as.character(HC01_EST_VC13))) %>% 
+  mutate(HC01_EST_VC12_2005 =as.numeric(as.character(HC01_EST_VC12))) %>% 
+  mutate(HC01_EST_VC11_2005 =as.numeric(as.character(HC01_EST_VC11))) %>%
+  mutate(HC01_EST_VC10_2005 =as.numeric(as.character(HC01_EST_VC10))) %>% 
+  mutate(HC01_EST_VC09_2005 =as.numeric(as.character(HC01_EST_VC09))) %>%  
+  mutate(HC01_EST_VC08_2005 =as.numeric(as.character(HC01_EST_VC08))) %>%    
+  mutate(HC01_EST_VC07_2005 =as.numeric(as.character(HC01_EST_VC07))) %>%  
+  mutate(HC01_EST_VC06_2005 =as.numeric(as.character(HC01_EST_VC06))) %>%   
+  mutate(HC01_EST_VC05_2005 =as.numeric(as.character(HC01_EST_VC05))) %>%  
+  mutate(HC01_EST_VC04_2005 =as.numeric(as.character(HC01_EST_VC04))) %>%   
+  mutate(HC01_EST_VC03_2005 =as.numeric(as.character(HC01_EST_VC03))) %>% 
+  mutate(HC01_EST_VC01_2005 =as.numeric(as.character(HC01_EST_VC01))) %>%  
+  select(GEO.id2, POP2017, POP2005,
+         HC01_EST_VC20_2005,
+         HC01_EST_VC19_2005,
+         HC01_EST_VC18_2005,
+         HC01_EST_VC17_2005,        
+         HC01_EST_VC16_2005,
+         HC01_EST_VC15_2005,
+         HC01_EST_VC14_2005,
+         HC01_EST_VC13_2005,
+         HC01_EST_VC12_2005,
+         HC01_EST_VC11_2005,
+         HC01_EST_VC10_2005,
+         HC01_EST_VC09_2005,        
+         HC01_EST_VC08_2005,
+         HC01_EST_VC07_2005,
+         HC01_EST_VC06_2005,
+         HC01_EST_VC05_2005,
+         HC01_EST_VC04_2005,
+         HC01_EST_VC03_2005,
+         HC01_EST_VC01_2005,
+         ) %>%
+  
+  inner_join(MSA_POP_2010, by=c("GEO.id2", "GEO.id2")) %>% 
+  mutate(POP2010 =as.numeric(as.character(HC01_EST_VC01))) %>%
+  mutate(HC01_EST_VC20_2010 =as.numeric(as.character(HC01_EST_VC20))) %>%
+  mutate(HC01_EST_VC19_2010 =as.numeric(as.character(HC01_EST_VC19))) %>% 
+  mutate(HC01_EST_VC18_2010 =as.numeric(as.character(HC01_EST_VC18))) %>% 
+  mutate(HC01_EST_VC17_2010 =as.numeric(as.character(HC01_EST_VC17))) %>%
+  mutate(HC01_EST_VC16_2010 =as.numeric(as.character(HC01_EST_VC16))) %>% 
+  mutate(HC01_EST_VC15_2010 =as.numeric(as.character(HC01_EST_VC15))) %>%  
+  mutate(HC01_EST_VC14_2010 =as.numeric(as.character(HC01_EST_VC14))) %>%
+  mutate(HC01_EST_VC13_2010 =as.numeric(as.character(HC01_EST_VC13))) %>% 
+  mutate(HC01_EST_VC12_2010 =as.numeric(as.character(HC01_EST_VC12))) %>% 
+  mutate(HC01_EST_VC11_2010 =as.numeric(as.character(HC01_EST_VC11))) %>%
+  mutate(HC01_EST_VC10_2010 =as.numeric(as.character(HC01_EST_VC10))) %>% 
+  mutate(HC01_EST_VC09_2010 =as.numeric(as.character(HC01_EST_VC09))) %>%  
+  mutate(HC01_EST_VC08_2010 =as.numeric(as.character(HC01_EST_VC08))) %>%    
+  mutate(HC01_EST_VC07_2010 =as.numeric(as.character(HC01_EST_VC07))) %>%  
+  mutate(HC01_EST_VC06_2010 =as.numeric(as.character(HC01_EST_VC06))) %>%   
+  mutate(HC01_EST_VC05_2010 =as.numeric(as.character(HC01_EST_VC05))) %>%  
+  mutate(HC01_EST_VC04_2010 =as.numeric(as.character(HC01_EST_VC04))) %>%   
+  mutate(HC01_EST_VC03_2010 =as.numeric(as.character(HC01_EST_VC03))) %>% 
+  mutate(HC01_EST_VC01_2010 =as.numeric(as.character(HC01_EST_VC01))) %>% 
+  select(GEO.id2, POP2017, POP2005,
+         HC01_EST_VC20_2005,
+         HC01_EST_VC19_2005,
+         HC01_EST_VC18_2005,
+         HC01_EST_VC17_2005,        
+         HC01_EST_VC16_2005,
+         HC01_EST_VC15_2005,
+         HC01_EST_VC14_2005,
+         HC01_EST_VC13_2005,
+         HC01_EST_VC12_2005,
+         HC01_EST_VC11_2005,
+         HC01_EST_VC10_2005,
+         HC01_EST_VC09_2005,        
+         HC01_EST_VC08_2005,
+         HC01_EST_VC07_2005,
+         HC01_EST_VC06_2005,
+         HC01_EST_VC05_2005,
+         HC01_EST_VC04_2005,
+         HC01_EST_VC03_2005,
+         HC01_EST_VC01_2005,
+         POP2010,
+         HC01_EST_VC20_2010,
+         HC01_EST_VC19_2010,
+         HC01_EST_VC18_2010,
+         HC01_EST_VC17_2010,        
+         HC01_EST_VC16_2010,
+         HC01_EST_VC15_2010,
+         HC01_EST_VC14_2010,
+         HC01_EST_VC13_2010,
+         HC01_EST_VC12_2010,
+         HC01_EST_VC11_2010,
+         HC01_EST_VC10_2010,
+         HC01_EST_VC09_2010,        
+         HC01_EST_VC08_2010,
+         HC01_EST_VC07_2010,
+         HC01_EST_VC06_2010,
+         HC01_EST_VC05_2010,
+         HC01_EST_VC04_2010,
+         HC01_EST_VC03_2010,
+         HC01_EST_VC01_2010,
+         ) %>%
+
+  inner_join(MSA_POP_2015, by=c("GEO.id2", "GEO.id2")) %>% 
+  mutate(POP2015 =as.numeric(as.character(HC01_EST_VC01))) %>%
+  mutate(HC01_EST_VC20_2015 =as.numeric(as.character(HC01_EST_VC20))) %>%
+  mutate(HC01_EST_VC19_2015 =as.numeric(as.character(HC01_EST_VC19))) %>% 
+  mutate(HC01_EST_VC18_2015 =as.numeric(as.character(HC01_EST_VC18))) %>% 
+  mutate(HC01_EST_VC17_2015 =as.numeric(as.character(HC01_EST_VC17))) %>%
+  mutate(HC01_EST_VC16_2015 =as.numeric(as.character(HC01_EST_VC16))) %>% 
+  mutate(HC01_EST_VC15_2015 =as.numeric(as.character(HC01_EST_VC15))) %>%  
+  mutate(HC01_EST_VC14_2015 =as.numeric(as.character(HC01_EST_VC14))) %>%
+  mutate(HC01_EST_VC13_2015 =as.numeric(as.character(HC01_EST_VC13))) %>% 
+  mutate(HC01_EST_VC12_2015 =as.numeric(as.character(HC01_EST_VC12))) %>% 
+  mutate(HC01_EST_VC11_2015 =as.numeric(as.character(HC01_EST_VC11))) %>%
+  mutate(HC01_EST_VC10_2015 =as.numeric(as.character(HC01_EST_VC10))) %>% 
+  mutate(HC01_EST_VC09_2015 =as.numeric(as.character(HC01_EST_VC09))) %>%  
+  mutate(HC01_EST_VC08_2015 =as.numeric(as.character(HC01_EST_VC08))) %>%    
+  mutate(HC01_EST_VC07_2015 =as.numeric(as.character(HC01_EST_VC07))) %>%  
+  mutate(HC01_EST_VC06_2015 =as.numeric(as.character(HC01_EST_VC06))) %>%   
+  mutate(HC01_EST_VC05_2015 =as.numeric(as.character(HC01_EST_VC05))) %>%  
+  mutate(HC01_EST_VC04_2015 =as.numeric(as.character(HC01_EST_VC04))) %>%   
+  mutate(HC01_EST_VC03_2015 =as.numeric(as.character(HC01_EST_VC03))) %>% 
+  mutate(HC01_EST_VC01_2015 =as.numeric(as.character(HC01_EST_VC01))) %>%
+
+  mutate(Growth05_10= (POP2010/POP2005)^(1/5)-1) %>%
+  mutate(Growth10_15= (POP2015/POP2010)^(1/5)-1) %>%
+  mutate(Growth10_17= (POP2017/POP2010)^(1/7)-1) %>%
+  mutate(Growth05_17= (POP2017/POP2005)^(1/12)-1) %>%
+  rowwise() %>% mutate(Growth_Forecast = max(Growth05_17,Growth10_17)) %>%
+  
+  mutate(POP_2015 = HC01_EST_VC01_2015) %>%
+  mutate(POP_2019 = POP2017 * ((1+(Growth_Forecast))^2  )) %>%
+  mutate(POP_2020 = POP2017 * ((1+(Growth_Forecast))^3  )) %>%  
+  mutate(POP_2025 = POP2017 * ((1+(Growth_Forecast))^8  )) %>%
+  mutate(POP_2030 = POP2017 * ((1+(Growth_Forecast))^13  )) %>% 
+  mutate(POP_2035 = POP2017 * ((1+(Growth_Forecast))^18 )) %>%
+  
+  mutate(POP80PLUS_2010 =(HC01_EST_VC20_2010+HC01_EST_VC19_2010)*POP2010/100) %>% 
+  mutate(POP80PLUS_2015 =(HC01_EST_VC20_2015+HC01_EST_VC19_2015)*POP2015/100) 
+ 
+
+
+############################################################
+## Forecast population by age chort for 2020, 2025 and 2030
+############################################################
+
+
+
+## Calculate Hamilton-Perry cohort component forecast per University of Virginia, Demographic Research Group methodology
+## see https://demographics.coopercenter.org/virginia-population-projections
+## Adjusted UVA's Hamilton-Perry methodology for 5-year intervals (vs. 10-year intervals)
+## Calculate 2020 as function of 2015 and 2010
+## FIRST STEP: calculate Cohort Change Ratios for 2010 to 2015 (CCR_HC01_EST_VC..)
+## SECOND STEP: calculate Locality Population HP(Hamilton Perry) figures (LocalPOP_HP_VC.)
+## THRID STEP: sum Locality Population figures across age cohorts (LocalPOP_HP_[YEAR])
+## FOURTH STEP: CALC population estimate by age cohort for target year; add new 80+ population and pop growths stats
+MSA_MASTER <- MSA_MASTER %>%
+  mutate(CCR_HC01_EST_VC20_2015 = (HC01_EST_VC20_2015/ HC01_EST_VC19_2010)) %>%
+  mutate(CCR_HC01_EST_VC19_2015 = (HC01_EST_VC19_2015/ HC01_EST_VC18_2010)) %>%
+  mutate(CCR_HC01_EST_VC18_2015 = (HC01_EST_VC18_2015/ HC01_EST_VC17_2010)) %>%
+  mutate(CCR_HC01_EST_VC17_2015 = (HC01_EST_VC17_2015/ HC01_EST_VC16_2010)) %>%
+  mutate(CCR_HC01_EST_VC16_2015 = (HC01_EST_VC16_2015/ HC01_EST_VC15_2010)) %>%
+  mutate(CCR_HC01_EST_VC15_2015 = (HC01_EST_VC15_2015/ HC01_EST_VC14_2010)) %>%
+  mutate(CCR_HC01_EST_VC14_2015 = (HC01_EST_VC14_2015/ HC01_EST_VC13_2010)) %>%
+  mutate(CCR_HC01_EST_VC13_2015 = (HC01_EST_VC13_2015/ HC01_EST_VC12_2010)) %>%
+  mutate(CCR_HC01_EST_VC12_2015 = (HC01_EST_VC12_2015/ HC01_EST_VC11_2010)) %>%
+  mutate(CCR_HC01_EST_VC11_2015 = (HC01_EST_VC11_2015/ HC01_EST_VC10_2010)) %>%
+  mutate(CCR_HC01_EST_VC10_2015 = (HC01_EST_VC10_2015/ HC01_EST_VC09_2010)) %>%
+  mutate(CCR_HC01_EST_VC09_2015 = (HC01_EST_VC09_2015/ HC01_EST_VC08_2010)) %>%
+  mutate(CCR_HC01_EST_VC08_2015 = (HC01_EST_VC08_2015/ HC01_EST_VC07_2010)) %>%
+  mutate(CCR_HC01_EST_VC07_2015 = (HC01_EST_VC07_2015/ HC01_EST_VC06_2010)) %>%
+  mutate(CCR_HC01_EST_VC06_2015 = (HC01_EST_VC06_2015/ HC01_EST_VC05_2010)) %>%
+  mutate(CCR_HC01_EST_VC05_2015 = (HC01_EST_VC05_2015/ HC01_EST_VC04_2010)) %>%
+  mutate(CCR_HC01_EST_VC04_2015 = (HC01_EST_VC04_2015/( HC01_EST_VC07_2015+
+                                                          HC01_EST_VC08_2015+
+                                                          HC01_EST_VC09_2015+
+                                                          HC01_EST_VC10_2015+
+                                                          HC01_EST_VC11_2015+
+                                                          HC01_EST_VC12_2015))) %>%
+  mutate(CCR_HC01_EST_VC03_2015 = (HC01_EST_VC03_2015/( HC01_EST_VC08_2015+
+                                                          HC01_EST_VC09_2015+
+                                                          HC01_EST_VC10_2015+
+                                                          HC01_EST_VC11_2015+
+                                                          HC01_EST_VC12_2015+
+                                                          HC01_EST_VC13_2015))) %>%
+
+  mutate(LocalPOP_HP_VC20_2020 = CCR_HC01_EST_VC20_2015 *(HC01_EST_VC19_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC19_2020 = CCR_HC01_EST_VC19_2015 *(HC01_EST_VC18_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC18_2020 = CCR_HC01_EST_VC18_2015 *(HC01_EST_VC17_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC17_2020 = CCR_HC01_EST_VC17_2015 *(HC01_EST_VC16_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC16_2020 = CCR_HC01_EST_VC16_2015 *(HC01_EST_VC15_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC15_2020 = CCR_HC01_EST_VC15_2015 *(HC01_EST_VC14_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC14_2020 = CCR_HC01_EST_VC14_2015 *(HC01_EST_VC13_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC13_2020 = CCR_HC01_EST_VC13_2015 *(HC01_EST_VC12_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC12_2020 = CCR_HC01_EST_VC12_2015 *(HC01_EST_VC11_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC11_2020 = CCR_HC01_EST_VC11_2015 *(HC01_EST_VC10_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC10_2020 = CCR_HC01_EST_VC10_2015 *(HC01_EST_VC09_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC09_2020 = CCR_HC01_EST_VC09_2015 *(HC01_EST_VC08_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC08_2020 = CCR_HC01_EST_VC08_2015 *(HC01_EST_VC07_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC07_2020 = CCR_HC01_EST_VC07_2015 *(HC01_EST_VC06_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC06_2020 = CCR_HC01_EST_VC06_2015 *(HC01_EST_VC05_2015*POP_2015)/100) %>%
+  mutate(LocalPOP_HP_VC05_2020 = CCR_HC01_EST_VC05_2015 *(HC01_EST_VC04_2015*POP_2015)/100) %>%
+  
+  mutate(LocalPOP_HP_VC04_2020 = CCR_HC01_EST_VC04_2015 *((HC01_EST_VC07_2015+
+                                                             HC01_EST_VC08_2015+
+                                                             HC01_EST_VC09_2015+
+                                                             HC01_EST_VC10_2015+
+                                                             HC01_EST_VC11_2015+
+                                                             HC01_EST_VC12_2015) *  POP_2015)/100)  %>%
+  mutate(LocalPOP_HP_VC03_2020 = CCR_HC01_EST_VC03_2015 *((HC01_EST_VC08_2015+
+                                                             HC01_EST_VC09_2015+
+                                                             HC01_EST_VC10_2015+
+                                                             HC01_EST_VC11_2015+
+                                                             HC01_EST_VC12_2015+
+                                                             HC01_EST_VC13_2015) *  POP_2015)/100) %>%
+  mutate(LocalityPOP_HP_2020 = 
+           LocalPOP_HP_VC20_2020+
+           LocalPOP_HP_VC19_2020+          
+           LocalPOP_HP_VC18_2020+
+           LocalPOP_HP_VC17_2020+             
+           LocalPOP_HP_VC16_2020+
+           LocalPOP_HP_VC15_2020+          
+           LocalPOP_HP_VC14_2020+
+           LocalPOP_HP_VC13_2020+   
+           LocalPOP_HP_VC12_2020+
+           LocalPOP_HP_VC11_2020+          
+           LocalPOP_HP_VC10_2020+
+           LocalPOP_HP_VC09_2020+             
+           LocalPOP_HP_VC08_2020+
+           LocalPOP_HP_VC07_2020+          
+           LocalPOP_HP_VC06_2020+
+           LocalPOP_HP_VC05_2020+          
+           LocalPOP_HP_VC04_2020+
+           LocalPOP_HP_VC03_2020) %>%
+
+  mutate(HC01_EST_VC20_2020 = ((LocalPOP_HP_VC20_2020 / LocalityPOP_HP_2020) )*100 )%>%
+  mutate(HC01_EST_VC19_2020 = ((LocalPOP_HP_VC19_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC18_2020 = ((LocalPOP_HP_VC18_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC17_2020 = ((LocalPOP_HP_VC17_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC16_2020 = ((LocalPOP_HP_VC16_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC15_2020 = ((LocalPOP_HP_VC15_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC14_2020 = ((LocalPOP_HP_VC14_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC13_2020 = ((LocalPOP_HP_VC13_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC12_2020 = ((LocalPOP_HP_VC12_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC11_2020 = ((LocalPOP_HP_VC11_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC10_2020 = ((LocalPOP_HP_VC10_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC09_2020 = ((LocalPOP_HP_VC09_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC08_2020 = ((LocalPOP_HP_VC08_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC07_2020 = ((LocalPOP_HP_VC07_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC06_2020 = ((LocalPOP_HP_VC06_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC05_2020 = ((LocalPOP_HP_VC05_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC04_2020 = ((LocalPOP_HP_VC04_2020 / LocalityPOP_HP_2020) )*100) %>%
+  mutate(HC01_EST_VC03_2020 = ((LocalPOP_HP_VC03_2020 / LocalityPOP_HP_2020) )*100) %>%
+  
+  mutate(POP80PLUS_2020 = POP_2020 *(HC01_EST_VC20_2020+ HC01_EST_VC19_2020)/100) %>%
+  mutate(ANNUAL_POP80_INCR_2015_2020 = (POP80PLUS_2020 - POP80PLUS_2015)/5) %>%
+  mutate(GROWTH80PLUS_2015_2020 = ((POP80PLUS_2020/POP80PLUS_2015)^(1/5))-1)
+
+
+
+
+## Calculate 2025 as function of 2020 and 2015  (v. prior which calculated 2020 as function of 2015 and 2010)
+## Same method as above; candidate for creating function()
+MSA_MASTER <- MSA_MASTER %>%
+  mutate(CCR_HC01_EST_VC20_2020 = (HC01_EST_VC20_2020/ HC01_EST_VC19_2015)) %>%
+  mutate(CCR_HC01_EST_VC19_2020 = (HC01_EST_VC19_2020/ HC01_EST_VC18_2015)) %>%
+  mutate(CCR_HC01_EST_VC18_2020 = (HC01_EST_VC18_2020/ HC01_EST_VC17_2015)) %>%
+  mutate(CCR_HC01_EST_VC17_2020 = (HC01_EST_VC17_2020/ HC01_EST_VC16_2015)) %>%
+  mutate(CCR_HC01_EST_VC16_2020 = (HC01_EST_VC16_2020/ HC01_EST_VC15_2015)) %>%
+  mutate(CCR_HC01_EST_VC15_2020 = (HC01_EST_VC15_2020/ HC01_EST_VC14_2015)) %>%
+  mutate(CCR_HC01_EST_VC14_2020 = (HC01_EST_VC14_2020/ HC01_EST_VC13_2015)) %>%
+  mutate(CCR_HC01_EST_VC13_2020 = (HC01_EST_VC13_2020/ HC01_EST_VC12_2015)) %>%
+  mutate(CCR_HC01_EST_VC12_2020 = (HC01_EST_VC12_2020/ HC01_EST_VC11_2015)) %>%
+  mutate(CCR_HC01_EST_VC11_2020 = (HC01_EST_VC11_2020/ HC01_EST_VC10_2015)) %>%
+  mutate(CCR_HC01_EST_VC10_2020 = (HC01_EST_VC10_2020/ HC01_EST_VC09_2015)) %>%
+  mutate(CCR_HC01_EST_VC09_2020 = (HC01_EST_VC09_2020/ HC01_EST_VC08_2015)) %>%
+  mutate(CCR_HC01_EST_VC08_2020 = (HC01_EST_VC08_2020/ HC01_EST_VC07_2015)) %>%
+  mutate(CCR_HC01_EST_VC07_2020 = (HC01_EST_VC07_2020/ HC01_EST_VC06_2015)) %>%
+  mutate(CCR_HC01_EST_VC06_2020 = (HC01_EST_VC06_2020/ HC01_EST_VC05_2015)) %>%
+  mutate(CCR_HC01_EST_VC05_2020 = (HC01_EST_VC05_2020/ HC01_EST_VC04_2015)) %>%
+  mutate(CCR_HC01_EST_VC04_2020 = (HC01_EST_VC04_2020/( HC01_EST_VC07_2020+
+                                                          HC01_EST_VC08_2020+
+                                                          HC01_EST_VC09_2020+
+                                                          HC01_EST_VC10_2020+
+                                                          HC01_EST_VC11_2020+
+                                                          HC01_EST_VC12_2020))) %>%
+  mutate(CCR_HC01_EST_VC03_2020 = (HC01_EST_VC03_2020/( HC01_EST_VC08_2020+
+                                                          HC01_EST_VC09_2020+
+                                                          HC01_EST_VC10_2020+
+                                                          HC01_EST_VC11_2020+
+                                                          HC01_EST_VC12_2020+
+                                                          HC01_EST_VC13_2020))) %>%
+  
+  mutate(LocalPOP_HP_VC20_2025 = CCR_HC01_EST_VC20_2020 *(HC01_EST_VC19_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC19_2025 = CCR_HC01_EST_VC19_2020 *(HC01_EST_VC18_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC18_2025 = CCR_HC01_EST_VC18_2020 *(HC01_EST_VC17_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC17_2025 = CCR_HC01_EST_VC17_2020 *(HC01_EST_VC16_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC16_2025 = CCR_HC01_EST_VC16_2020 *(HC01_EST_VC15_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC15_2025 = CCR_HC01_EST_VC15_2020 *(HC01_EST_VC14_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC14_2025 = CCR_HC01_EST_VC14_2020 *(HC01_EST_VC13_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC13_2025 = CCR_HC01_EST_VC13_2020 *(HC01_EST_VC12_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC12_2025 = CCR_HC01_EST_VC12_2020 *(HC01_EST_VC11_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC11_2025 = CCR_HC01_EST_VC11_2020 *(HC01_EST_VC10_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC10_2025 = CCR_HC01_EST_VC10_2020 *(HC01_EST_VC09_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC09_2025 = CCR_HC01_EST_VC09_2020 *(HC01_EST_VC08_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC08_2025 = CCR_HC01_EST_VC08_2020 *(HC01_EST_VC07_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC07_2025 = CCR_HC01_EST_VC07_2020 *(HC01_EST_VC06_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC06_2025 = CCR_HC01_EST_VC06_2020 *(HC01_EST_VC05_2020*POP_2020)/100) %>%
+  mutate(LocalPOP_HP_VC05_2025 = CCR_HC01_EST_VC05_2020 *(HC01_EST_VC04_2020*POP_2020)/100) %>%
+  
+  mutate(LocalPOP_HP_VC04_2025 = CCR_HC01_EST_VC04_2020 *((HC01_EST_VC07_2020+
+                                                             HC01_EST_VC08_2020+
+                                                             HC01_EST_VC09_2020+
+                                                             HC01_EST_VC10_2020+
+                                                             HC01_EST_VC11_2020+
+                                                             HC01_EST_VC12_2020) *  POP_2020)/100)  %>%
+  mutate(LocalPOP_HP_VC03_2025 = CCR_HC01_EST_VC03_2020 *((HC01_EST_VC08_2020+
+                                                             HC01_EST_VC09_2020+
+                                                             HC01_EST_VC10_2020+
+                                                             HC01_EST_VC11_2020+
+                                                             HC01_EST_VC12_2020+
+                                                             HC01_EST_VC13_2020) *  POP_2020)/100) %>%
+  mutate(LocalityPOP_HP_2025 = 
+           LocalPOP_HP_VC20_2025+
+           LocalPOP_HP_VC19_2025+          
+           LocalPOP_HP_VC18_2025+
+           LocalPOP_HP_VC17_2025+             
+           LocalPOP_HP_VC16_2025+
+           LocalPOP_HP_VC15_2025+          
+           LocalPOP_HP_VC14_2025+
+           LocalPOP_HP_VC13_2025+   
+           LocalPOP_HP_VC12_2025+
+           LocalPOP_HP_VC11_2025+          
+           LocalPOP_HP_VC10_2025+
+           LocalPOP_HP_VC09_2025+             
+           LocalPOP_HP_VC08_2025+
+           LocalPOP_HP_VC07_2025+          
+           LocalPOP_HP_VC06_2025+
+           LocalPOP_HP_VC05_2025+          
+           LocalPOP_HP_VC04_2025+
+           LocalPOP_HP_VC03_2025) %>%
+  
+  mutate(HC01_EST_VC20_2025 = ((LocalPOP_HP_VC20_2025 / LocalityPOP_HP_2025) )*100 )%>%
+  mutate(HC01_EST_VC19_2025 = ((LocalPOP_HP_VC19_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC18_2025 = ((LocalPOP_HP_VC18_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC17_2025 = ((LocalPOP_HP_VC17_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC16_2025 = ((LocalPOP_HP_VC16_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC15_2025 = ((LocalPOP_HP_VC15_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC14_2025 = ((LocalPOP_HP_VC14_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC13_2025 = ((LocalPOP_HP_VC13_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC12_2025 = ((LocalPOP_HP_VC12_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC11_2025 = ((LocalPOP_HP_VC11_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC10_2025 = ((LocalPOP_HP_VC10_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC09_2025 = ((LocalPOP_HP_VC09_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC08_2025 = ((LocalPOP_HP_VC08_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC07_2025 = ((LocalPOP_HP_VC07_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC06_2025 = ((LocalPOP_HP_VC06_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC05_2025 = ((LocalPOP_HP_VC05_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC04_2025 = ((LocalPOP_HP_VC04_2025 / LocalityPOP_HP_2025) )*100) %>%
+  mutate(HC01_EST_VC03_2025 = ((LocalPOP_HP_VC03_2025 / LocalityPOP_HP_2025) )*100) %>%
+  
+  mutate(POP80PLUS_2025 = POP_2025 *(HC01_EST_VC20_2025+ HC01_EST_VC19_2025)/100) %>%
+  mutate(ANNUAL_POP80_INCR_2020_2025 = (POP80PLUS_2025 - POP80PLUS_2020)/5) %>%
+  mutate(GROWTH80PLUS_2020_2025 = ((POP80PLUS_2025/POP80PLUS_2020)^(1/5))-1)
+
+
+## Calculate 2030 as function of 2025 and 2020  
+## Same method as above; candidate for creating function()
+MSA_MASTER <- MSA_MASTER %>%
+  mutate(CCR_HC01_EST_VC20_2025 = (HC01_EST_VC20_2025/ HC01_EST_VC19_2020)) %>%
+  mutate(CCR_HC01_EST_VC19_2025 = (HC01_EST_VC19_2025/ HC01_EST_VC18_2020)) %>%
+  mutate(CCR_HC01_EST_VC18_2025 = (HC01_EST_VC18_2025/ HC01_EST_VC17_2020)) %>%
+  mutate(CCR_HC01_EST_VC17_2025 = (HC01_EST_VC17_2025/ HC01_EST_VC16_2020)) %>%
+  mutate(CCR_HC01_EST_VC16_2025 = (HC01_EST_VC16_2025/ HC01_EST_VC15_2020)) %>%
+  mutate(CCR_HC01_EST_VC15_2025 = (HC01_EST_VC15_2025/ HC01_EST_VC14_2020)) %>%
+  mutate(CCR_HC01_EST_VC14_2025 = (HC01_EST_VC14_2025/ HC01_EST_VC13_2020)) %>%
+  mutate(CCR_HC01_EST_VC13_2025 = (HC01_EST_VC13_2025/ HC01_EST_VC12_2020)) %>%
+  mutate(CCR_HC01_EST_VC12_2025 = (HC01_EST_VC12_2025/ HC01_EST_VC11_2020)) %>%
+  mutate(CCR_HC01_EST_VC11_2025 = (HC01_EST_VC11_2025/ HC01_EST_VC10_2020)) %>%
+  mutate(CCR_HC01_EST_VC10_2025 = (HC01_EST_VC10_2025/ HC01_EST_VC09_2020)) %>%
+  mutate(CCR_HC01_EST_VC09_2025 = (HC01_EST_VC09_2025/ HC01_EST_VC08_2020)) %>%
+  mutate(CCR_HC01_EST_VC08_2025 = (HC01_EST_VC08_2025/ HC01_EST_VC07_2020)) %>%
+  mutate(CCR_HC01_EST_VC07_2025 = (HC01_EST_VC07_2025/ HC01_EST_VC06_2020)) %>%
+  mutate(CCR_HC01_EST_VC06_2025 = (HC01_EST_VC06_2025/ HC01_EST_VC05_2020)) %>%
+  mutate(CCR_HC01_EST_VC05_2025 = (HC01_EST_VC05_2025/ HC01_EST_VC04_2020)) %>%
+  mutate(CCR_HC01_EST_VC04_2025 = (HC01_EST_VC04_2025/( HC01_EST_VC07_2025+
+                                                          HC01_EST_VC08_2025+
+                                                          HC01_EST_VC09_2025+
+                                                          HC01_EST_VC10_2025+
+                                                          HC01_EST_VC11_2025+
+                                                          HC01_EST_VC12_2025))) %>%
+  mutate(CCR_HC01_EST_VC03_2025 = (HC01_EST_VC03_2025/( HC01_EST_VC08_2025+
+                                                          HC01_EST_VC09_2025+
+                                                          HC01_EST_VC10_2025+
+                                                          HC01_EST_VC11_2025+
+                                                          HC01_EST_VC12_2025+
+                                                          HC01_EST_VC13_2025))) %>%
+  
+  mutate(LocalPOP_HP_VC20_2030 = CCR_HC01_EST_VC20_2025 *(HC01_EST_VC19_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC19_2030 = CCR_HC01_EST_VC19_2025 *(HC01_EST_VC18_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC18_2030 = CCR_HC01_EST_VC18_2025 *(HC01_EST_VC17_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC17_2030 = CCR_HC01_EST_VC17_2025 *(HC01_EST_VC16_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC16_2030 = CCR_HC01_EST_VC16_2025 *(HC01_EST_VC15_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC15_2030 = CCR_HC01_EST_VC15_2025 *(HC01_EST_VC14_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC14_2030 = CCR_HC01_EST_VC14_2025 *(HC01_EST_VC13_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC13_2030 = CCR_HC01_EST_VC13_2025 *(HC01_EST_VC12_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC12_2030 = CCR_HC01_EST_VC12_2025 *(HC01_EST_VC11_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC11_2030 = CCR_HC01_EST_VC11_2025 *(HC01_EST_VC10_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC10_2030 = CCR_HC01_EST_VC10_2025 *(HC01_EST_VC09_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC09_2030 = CCR_HC01_EST_VC09_2025 *(HC01_EST_VC08_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC08_2030 = CCR_HC01_EST_VC08_2025 *(HC01_EST_VC07_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC07_2030 = CCR_HC01_EST_VC07_2025 *(HC01_EST_VC06_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC06_2030 = CCR_HC01_EST_VC06_2025 *(HC01_EST_VC05_2025*POP_2025)/100) %>%
+  mutate(LocalPOP_HP_VC05_2030 = CCR_HC01_EST_VC05_2025 *(HC01_EST_VC04_2025*POP_2025)/100) %>%
+  
+  mutate(LocalPOP_HP_VC04_2030 = CCR_HC01_EST_VC04_2025 *((HC01_EST_VC07_2025+
+                                                             HC01_EST_VC08_2025+
+                                                             HC01_EST_VC09_2025+
+                                                             HC01_EST_VC10_2025+
+                                                             HC01_EST_VC11_2025+
+                                                             HC01_EST_VC12_2025) *  POP_2025)/100)  %>%
+  mutate(LocalPOP_HP_VC03_2030 = CCR_HC01_EST_VC03_2025 *((HC01_EST_VC08_2025+
+                                                             HC01_EST_VC09_2025+
+                                                             HC01_EST_VC10_2025+
+                                                             HC01_EST_VC11_2025+
+                                                             HC01_EST_VC12_2025+
+                                                             HC01_EST_VC13_2025) *  POP_2025)/100) %>%
+  mutate(LocalityPOP_HP_2030 = 
+           LocalPOP_HP_VC20_2030+
+           LocalPOP_HP_VC19_2030+          
+           LocalPOP_HP_VC18_2030+
+           LocalPOP_HP_VC17_2030+             
+           LocalPOP_HP_VC16_2030+
+           LocalPOP_HP_VC15_2030+          
+           LocalPOP_HP_VC14_2030+
+           LocalPOP_HP_VC13_2030+   
+           LocalPOP_HP_VC12_2030+
+           LocalPOP_HP_VC11_2030+          
+           LocalPOP_HP_VC10_2030+
+           LocalPOP_HP_VC09_2030+             
+           LocalPOP_HP_VC08_2030+
+           LocalPOP_HP_VC07_2030+          
+           LocalPOP_HP_VC06_2030+
+           LocalPOP_HP_VC05_2030+          
+           LocalPOP_HP_VC04_2030+
+           LocalPOP_HP_VC03_2030) %>%
+  
+  mutate(HC01_EST_VC20_2030 = ((LocalPOP_HP_VC20_2030 / LocalityPOP_HP_2030) )*100 )%>%
+  mutate(HC01_EST_VC19_2030 = ((LocalPOP_HP_VC19_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC18_2030 = ((LocalPOP_HP_VC18_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC17_2030 = ((LocalPOP_HP_VC17_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC16_2030 = ((LocalPOP_HP_VC16_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC15_2030 = ((LocalPOP_HP_VC15_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC14_2030 = ((LocalPOP_HP_VC14_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC13_2030 = ((LocalPOP_HP_VC13_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC12_2030 = ((LocalPOP_HP_VC12_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC11_2030 = ((LocalPOP_HP_VC11_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC10_2030 = ((LocalPOP_HP_VC10_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC09_2030 = ((LocalPOP_HP_VC09_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC08_2030 = ((LocalPOP_HP_VC08_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC07_2030 = ((LocalPOP_HP_VC07_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC06_2030 = ((LocalPOP_HP_VC06_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC05_2030 = ((LocalPOP_HP_VC05_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC04_2030 = ((LocalPOP_HP_VC04_2030 / LocalityPOP_HP_2030) )*100) %>%
+  mutate(HC01_EST_VC03_2030 = ((LocalPOP_HP_VC03_2030 / LocalityPOP_HP_2030) )*100) %>%
+  
+  mutate(POP80PLUS_2030 = POP_2030 *(HC01_EST_VC20_2030+ HC01_EST_VC19_2030)/100) %>%
+  mutate(ANNUAL_POP80_INCR_2025_2030 = (POP80PLUS_2030 - POP80PLUS_2025)/5) %>%
+  mutate(GROWTH80PLUS_2025_2030 = ((POP80PLUS_2030/POP80PLUS_2025)^(1/5))-1)
+
+
+################################################
+## Clean supply data; add new supply attributes
+################################################
+
+
+## Create supply data frame from ASHA data including 2015 and 2017 Household (HH) penetration rates; all figures related to 2019
+## Construction Monitor penetration figures (based on households (HH)) not utilized in forecast calculation
+MSA_SUPPLY_MASTER <- MSA_SUPPLY_2015 %>%
+  mutate(CCRC_Inv_Penetration_2015HH = CCRC_Inv_Penetration) %>%  
+  mutate(IL_Inv_Penetration_2015HH   = IL_Inv_Penetration) %>%
+  mutate(AL_Inv_Penetration_2015HH   = AL_Inv_Penetration) %>%  
+  mutate(MC_Inv_Penetration_2015HH   = MC_Inv_Penetration) %>%
+  mutate(NC_Inv_Penetration_2015HH   = NC_Inv_Penetration) %>%
+  select(GEO.id2,
+         CCRC_Inv_Penetration_2015HH,       
+         IL_Inv_Penetration_2015HH,
+         AL_Inv_Penetration_2015HH,
+         MC_Inv_Penetration_2015HH,
+         NC_Inv_Penetration_2015HH) %>%
+  inner_join(MSA_SUPPLY_2017,by=c("GEO.id2", "GEO.id2")) %>%
+  mutate(CCRC_Inv_Penetration_2017HH = CCRC_Inv_Penetration) %>% 
+  mutate(IL_Inv_Penetration_2017HH   = IL_Inv_Penetration) %>%
+  mutate(AL_Inv_Penetration_2017HH   = AL_Inv_Penetration) %>%  
+  mutate(MC_Inv_Penetration_2017HH   = MC_Inv_Penetration) %>%
+  mutate(NC_Inv_Penetration_2017HH   = NC_Inv_Penetration) %>%
+  select(GEO.id2,
+       CCRC_Inv_Penetration_2015HH,     
+       IL_Inv_Penetration_2015HH,
+       AL_Inv_Penetration_2015HH,
+       MC_Inv_Penetration_2015HH,
+       NC_Inv_Penetration_2015HH,
+       CCRC_Inv_Penetration_2017HH,
+       IL_Inv_Penetration_2017HH,
+       AL_Inv_Penetration_2017HH,
+       MC_Inv_Penetration_2017HH,
+       NC_Inv_Penetration_2017HH) %>%
+  inner_join(MSA_SUPPLY_2019,by=c("GEO.id2", "GEO.id2")) %>%
+  mutate(CCRC_Inv_Penetration_2019HH =  CCRC_Inv_Penetration) %>%
+  mutate(IL_Inv_Penetration_2019HH   =  IL_Inv_Penetration) %>%
+  mutate(AL_Inv_Penetration_2019HH   =  AL_Inv_Penetration) %>%  
+  mutate(MC_Inv_Penetration_2019HH   =  MC_Inv_Penetration) %>%
+  mutate(NC_Inv_Penetration_2019HH   =  NC_Inv_Penetration)
+
+
+#########################################################################
+## Join population+supply data; calculate ratios; forecast future units
+#########################################################################
+
+## Join/merge MSA_SUPPLY data with MSA_MASTER
+MSA_SUPPLY_MASTER$GEO.id2 <- as.character(MSA_SUPPLY_MASTER$GEO.id2)
+MSA_MASTER <- MSA_MASTER %>%
+  inner_join(MSA_SUPPLY_MASTER,by=c("GEO.id2", "GEO.id2"))
+
+
+## Calculate the 80+ ratios (Construction Monitor ratios based on 75+ households; not utilized in CALC)
+## Calculate implied future unit inventory
+## Calculate implied annual additional units per year
+MSA_MASTER <- MSA_MASTER %>%
+  mutate(POP80PLUS_2019 = ((POP80PLUS_2020-POP80PLUS_2015)/5*4)+POP80PLUS_2015) %>%
+  mutate(CCRC_Inv_Units = as.numeric(gsub(",", "", CCRC_Inv_Units))) %>%
+  mutate(IL_Inv_Units   = as.numeric(gsub(",", "", IL_Inv_Units))) %>%  
+  mutate(AL_Inv_Units   = as.numeric(gsub(",", "", AL_Inv_Units))) %>%
+  mutate(MC_Inv_Units   = as.numeric(gsub(",", "", MC_Inv_Units))) %>% 
+  mutate(NC_Inv_Units   = as.numeric(gsub(",", "", NC_Inv_Units))) %>%
+  
+  mutate(CCRC_Inv_Penetration_2019   = CCRC_Inv_Units / POP80PLUS_2019) %>%
+  mutate(IL_Inv_Penetration_2019     = IL_Inv_Units   / POP80PLUS_2019) %>%
+  mutate(AL_Inv_Penetration_2019     = AL_Inv_Units   / POP80PLUS_2019) %>%
+  mutate(MC_Inv_Penetration_2019     = MC_Inv_Units   / POP80PLUS_2019) %>%
+  mutate(NC_Inv_Penetration_2019     = NC_Inv_Units   / POP80PLUS_2019) %>%
+  mutate(AL_MC_Inv_Penetration_2019 = AL_Inv_Penetration_2019 +MC_Inv_Penetration_2019) %>%
+
+  mutate(CCRC_Inv_Units_2020 = CCRC_Inv_Penetration_2019 * POP80PLUS_2020) %>%
+  mutate(IL_Inv_Units_2020   = IL_Inv_Penetration_2019   * POP80PLUS_2020) %>%
+  mutate(AL_Inv_Units_2020   = AL_Inv_Penetration_2019   * POP80PLUS_2020) %>%
+  mutate(MC_Inv_Units_2020   = MC_Inv_Penetration_2019   * POP80PLUS_2020) %>%
+  mutate(NC_Inv_Units_2020   = NC_Inv_Penetration_2019   * POP80PLUS_2020) %>%
+  mutate(AL_MC_Inv_Units_2020  = AL_MC_Inv_Penetration_2019   * POP80PLUS_2020) %>%
+  
+  mutate(CCRC_Inv_Units_2025 = CCRC_Inv_Penetration_2019 * POP80PLUS_2025) %>%
+  mutate(IL_Inv_Units_2025   = IL_Inv_Penetration_2019   * POP80PLUS_2025) %>%
+  mutate(AL_Inv_Units_2025   = AL_Inv_Penetration_2019   * POP80PLUS_2025) %>%
+  mutate(MC_Inv_Units_2025   = MC_Inv_Penetration_2019   * POP80PLUS_2025) %>%
+  mutate(NC_Inv_Units_2025   = NC_Inv_Penetration_2019   * POP80PLUS_2025) %>%
+  mutate(AL_MC_Inv_Units_2025  = AL_MC_Inv_Penetration_2019   * POP80PLUS_2025) %>%
+  
+  mutate(CCRC_Inv_Units_2030 = CCRC_Inv_Penetration_2019 * POP80PLUS_2030) %>%
+  mutate(IL_Inv_Units_2030   = IL_Inv_Penetration_2019   * POP80PLUS_2030) %>%
+  mutate(AL_Inv_Units_2030   = AL_Inv_Penetration_2019   * POP80PLUS_2030) %>%
+  mutate(MC_Inv_Units_2030   = MC_Inv_Penetration_2019   * POP80PLUS_2030) %>%
+  mutate(NC_Inv_Units_2030   = NC_Inv_Penetration_2019   * POP80PLUS_2030) %>%
+  mutate(AL_MC_Inv_Units_2030  = AL_MC_Inv_Penetration_2019 * POP80PLUS_2030) %>%
+  
+  mutate(CCRC_Unit_GROWTH_2019_2025 = (CCRC_Inv_Units_2025 - CCRC_Inv_Units)/ 6) %>%
+  mutate(IL_Unit_GROWTH_2019_2025   = (IL_Inv_Units_2025   - IL_Inv_Units)  / 6) %>%
+  mutate(AL_Unit_GROWTH_2019_2025   = (AL_Inv_Units_2025   - AL_Inv_Units)  / 6) %>%
+  mutate(MC_Unit_GROWTH_2019_2025   = (MC_Inv_Units_2025   - MC_Inv_Units)  / 6) %>%      
+  mutate(NC_Unit_GROWTH_2019_2025   = (NC_Inv_Units_2025   - NC_Inv_Units)  / 6) %>%
+  mutate(AL_MC_Unit_GROWTH_2019_2025       = (AL_MC_Inv_Units_2025   - (AL_Inv_Units + MC_Inv_Units))/ 6) %>%
+
+  mutate(CCRC_Unit_GROWTH_2025_2030 = (CCRC_Inv_Units_2030 - CCRC_Inv_Units_2025)/ 5) %>%
+  mutate(IL_Unit_GROWTH_2025_2030   = (IL_Inv_Units_2030  - IL_Inv_Units_2025)  / 5) %>%
+  mutate(AL_Unit_GROWTH_2025_2030   = (AL_Inv_Units_2030  - AL_Inv_Units_2025)  / 5) %>%
+  mutate(MC_Unit_GROWTH_2025_2030   = (MC_Inv_Units_2030   - MC_Inv_Units_2025)  / 5) %>%      
+  mutate(NC_Unit_GROWTH_2025_2030   = (NC_Inv_Units_2030   - NC_Inv_Units_2025)  / 5) %>%
+  mutate(AL_MC_Unit_GROWTH_2025_2030   = (AL_MC_Inv_Units_2030- AL_MC_Inv_Units_2025) / 5) 
+  
+
+
+##################################################
+## Chart results
+##################################################
+
+## Create subset of top 10 MSA for charting
+## 4.8 million threshold for MSA's; 9.5 million for states
+MSA_MASTER10 <- MSA_MASTER %>%
+  filter(POP2017>4800000)
+
+
+## CHART: POP growth rates for Top10 MSA (All Age Cohorts)
+## Note that Forecast Growth is the MAX of annaul growth rates from 2005-2017 and 2010-2017 Periods"
+MSA_MASTER10 <- MSA_MASTER10 %>%
+  rename(Period_2005_2010_ = Growth05_10) %>%
+  rename(Period_2010_2017_ = Growth10_17) %>%
+  rename(Period_2005_2017_ = Growth05_17) 
+
+ggplot(data=MSA_MASTER10, 
+         aes(x=reorder(MSA, -Growth_Forecast), y=Growth_Forecast)) + 
+  geom_bar(fill="gray", stat="identity")+
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,0.030),labels = scales::percent_format(accuracy = .10), breaks = seq(0,.035,0.005)) +
+  geom_point(aes(y = Period_2005_2010_, colour = "Period_2005_2010_")) +
+  geom_point(aes(y = Period_2010_2017_, colour = "Period_2010_2017_")) +
+  geom_point(aes(y = Period_2005_2017_, colour = "Period_2005_2017_")) +
+  scale_colour_manual("", 
+                      breaks = c("Period_2005_2010_","Period_2010_2017_","Period_2005_2017_"),
+                      values = c("darkgreen","orange","darkred"))+
+  labs(title="Annual MSA Population Forecast Growth Rates",
+       y="Annual Population Growth Rate",
+       x="MSA") +
+  guides(color=guide_legend("Time Periods")) 
+
+ggplot(data=MSA_MASTER10, 
+       aes(x=reorder(MSA, -Growth_Forecast), y=GROWTH80PLUS_2020_2025))+ 
+  geom_bar(fill="gray", stat="identity")+
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,0.08),labels = scales::percent_format(accuracy = .10), breaks = seq(0,.08,0.01)) +
+  labs(title="Estimated 80+ Annual Growth Rates - 2020 thru 2025",
+       y="Annual 80+ Population Growth Rate",
+       x="MSA")
+
+## 80+ Growth for 2025 to 2030 excluded in final version of paper
+## ggplot(data=MSA_MASTER10, 
+##       aes(x=reorder(MSA, -Growth_Forecast), y=GROWTH80PLUS_2025_2030))+ 
+##  geom_bar(fill="gray", stat="identity")+
+##  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+##  scale_y_continuous(limits = c(0,0.08),labels = scales::percent_format(accuracy = .10), breaks = seq(0,.08,0.01)) +
+##  labs(title="Estimated 80+ Annual Growth Rates - 2025 thru 2030",
+##       y="Annual 80+ Population Growth Rate",
+##       x="MSA")
+
+
+
+## For Charts, establish color scheme
+## For Hex codes, use utility at this link:
+## see http://colorbrewer2.org/#type=sequential&scheme=Purples&n=4
+## For time periods .. use grey:  #bdbdbd, #636363
+## FOR CCRC/IL .. use purple : #cbc9e2, #9e9ac8,#6a51a3 (throw out first value; too light)
+## FOR AL/MC/NC ... use green:  #bae4b3, #74c476, #238b45
+
+
+## Chart annual growth in 80+ population
+data <- MSA_MASTER10 %>%
+  select(MSA, ANNUAL_POP80_INCR_2020_2025, ANNUAL_POP80_INCR_2025_2030) %>%
+  rename(Period_2020_2025 = ANNUAL_POP80_INCR_2020_2025) %>%
+  rename(Period_2025_2030 = ANNUAL_POP80_INCR_2025_2030) 
+usePalette = c("#BDBDBD", "#636363")
+melteddata = melt(data,id.vars="MSA")
+plotS1 <- ggplot(melteddata, aes(x=reorder(MSA,-value),y=value,factor=variable,fill=variable))
+plotS1 +  geom_bar(stat="identity", width = 0.5, position = "dodge") +
+  ylab("Annual Growth in 80+ Population")+xlab("MSA") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,45000),labels = scales::comma, breaks = seq(0,45000,5000)) +
+  labs(title="Annual Growth in 80+ Population by MSA (Sorted by Total Growth)") + 
+  scale_fill_manual(values = usePalette) +
+  theme(legend.title = element_blank()) + 
+  theme(legend.position="right")
+
+
+## Chart 80+ Ratios for all categories
+data <- MSA_MASTER10 %>%
+  select(MSA, CCRC_Inv_Penetration_2019, IL_Inv_Penetration_2019, AL_Inv_Penetration_2019, MC_Inv_Penetration_2019, NC_Inv_Penetration_2019) %>%
+  rename(CCRC=CCRC_Inv_Penetration_2019) %>%
+  rename(IL=IL_Inv_Penetration_2019) %>%  
+  rename(AL=AL_Inv_Penetration_2019) %>% 
+  rename(MC=MC_Inv_Penetration_2019) %>%  
+  rename(NC=NC_Inv_Penetration_2019) 
+usePalette = c("#6A51A3", "#9E9AC8","#BAE4B3", "#74C476", "#238B45")
+melteddata = melt(data,id.vars="MSA")
+plotS1 <- ggplot(melteddata, aes(x=reorder(MSA,-value),y=value,factor=variable,fill=variable))
+plotS1 +  geom_bar(stat="identity") +
+  ylab("Ratios of Units to 80+ Population")+xlab("MSA") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,0.35),labels = scales::percent_format(accuracy = 1.0), breaks = seq(0,.35,0.05)) +
+  labs(title="Ratio of Units to 80+ Population By Category") + 
+  scale_fill_manual(values = usePalette) +
+  theme(legend.title = element_blank())
+
+
+# 80+ Ratios for CCRC | IL | AL+MC
+data <- MSA_MASTER10 %>%
+  select(MSA, CCRC_Inv_Penetration_2019, IL_Inv_Penetration_2019, AL_MC_Inv_Penetration_2019) %>%
+  rename(CCRC_ = CCRC_Inv_Penetration_2019) %>%
+  rename(IL_   = IL_Inv_Penetration_2019) %>%
+  rename(AL_MC_ = AL_MC_Inv_Penetration_2019)
+usePalette = c("#6A51A3", "#9E9AC8","#74C476")
+
+melteddata = melt(data,id.vars="MSA")
+plotS1 <- ggplot(melteddata, aes(x=reorder(MSA,-value),y=value,factor=variable,fill=variable))
+plotS1 +  geom_bar(stat="identity", width = 0.5, position = "dodge") +
+  ylab("Units to 80+ Population")+xlab("MSA") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,0.125),labels = scales::percent_format(accuracy = .10), breaks = seq(0,.125,0.025)) +
+  labs(title="Units to 80+ Population | CCRC vs. IL vs. AL+MC") + 
+  scale_fill_manual(values = usePalette) +
+  theme(legend.title = element_blank()) + 
+  theme(legend.position="right")
+
+
+##Chart Annual Growth; 2019-2025| 2025-2035; CCRC 
+data <- MSA_MASTER10 %>%
+  select(MSA, CCRC_Unit_GROWTH_2019_2025, CCRC_Unit_GROWTH_2025_2030) %>%
+  rename(Period_2019_2025 = CCRC_Unit_GROWTH_2019_2025) %>%
+  rename(Period_2025_2030 = CCRC_Unit_GROWTH_2025_2030)
+usePalette = c("#BDBDBD", "#7B3294")
+melteddata = melt(data,id.vars="MSA")
+plotS1 <- ggplot(melteddata, aes(x=reorder(MSA,-value),y=value,factor=variable,fill=variable))
+plotS1 +  geom_bar(stat="identity", width = 0.5, position = "dodge") +
+  ylab("Units per Year")+xlab("MSA") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,2000),labels = scales::comma, breaks = seq(0,2000,500)) +
+  labs(title="CCRC Units per Year") + 
+  scale_fill_manual(values = usePalette) +
+  theme(legend.title = element_blank()) + 
+  theme(legend.position="right")
+
+
+##Chart Annual Growth; 2019-2025| 2025-2035; IL 
+data <- MSA_MASTER10 %>%
+  select(MSA, IL_Unit_GROWTH_2019_2025, IL_Unit_GROWTH_2025_2030) %>%
+  rename(Period_2019_2025 = IL_Unit_GROWTH_2019_2025) %>%
+  rename(Period_2025_2030 = IL_Unit_GROWTH_2025_2030)
+usePalette = c("#BDBDBD", "#9E9AC8")
+melteddata = melt(data,id.vars="MSA")
+plotS1 <- ggplot(melteddata, aes(x=reorder(MSA,-value),y=value,factor=variable,fill=variable))
+plotS1 +  geom_bar(stat="identity", width = 0.5, position = "dodge") +
+  ylab("Units per Year")+xlab("MSA") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,1500),labels = scales::comma, breaks = seq(0,1500,500)) +
+  labs(title="IL Units per Year") + 
+  scale_fill_manual(values = usePalette) +
+  theme(legend.title = element_blank()) + 
+  theme(legend.position="right")
+
+
+##Chart Annual Growth; 2019-2025| 2025-2035; AL + MC
+data <- MSA_MASTER10 %>%
+  select(MSA, AL_MC_Unit_GROWTH_2019_2025, AL_MC_Unit_GROWTH_2025_2030) %>%
+  rename(Period_2019_2025 = AL_MC_Unit_GROWTH_2019_2025) %>%
+  rename(Period_2025_2030 = AL_MC_Unit_GROWTH_2025_2030)
+usePalette = c("#BDBDBD", "#008837")
+melteddata = melt(data,id.vars="MSA")
+plotS1 <- ggplot(melteddata, aes(x=reorder(MSA,-value),y=value,factor=variable,fill=variable))
+plotS1 +  geom_bar(stat="identity", width = 0.5, position = "dodge") +
+  ylab("Units per Year")+xlab("MSA") +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  scale_y_continuous(limits = c(0,2000),labels = scales::comma, breaks = seq(0,2000,500)) +
+  labs(title="AL + MC Units per Year") + 
+  scale_fill_manual(values = usePalette) +
+  theme(legend.title = element_blank()) + 
+  theme(legend.position="right")
+
+
+## Aggregation of counts for all MSAs
+CCRC_2025 <- sum(MSA_MASTER$CCRC_Unit_GROWTH_2019_2025)
+CCRC_2030 <- sum(MSA_MASTER$CCRC_Unit_GROWTH_2025_2030)
+IL_2025 <- sum(MSA_MASTER$IL_Unit_GROWTH_2019_2025)
+IL_2030 <- sum(MSA_MASTER$IL_Unit_GROWTH_2025_2030)
+AL_MC_2025 <- sum(MSA_MASTER$AL_MC_Unit_GROWTH_2019_2025)
+AL_MC_2030 <- sum(MSA_MASTER$AL_MC_Unit_GROWTH_2025_2030)
+TOTAL_2025 <- CCRC_2025 + IL_2025 + AL_MC_2025
+TOTAL_2030 <- CCRC_2030 + IL_2030 + AL_MC_2030
+TOTAL_2030
+  
+
+  
+
+
+###################################################
+## Export data
+###################################################
+
+## EXERCPT includes data fields for Exhibit A + B
+MSA_MASTER_EXCERPT <- MSA_MASTER %>%
+  select(MSA,
+         GEO.id2,
+         POP_2019,
+         POP80PLUS_2019,
+         Growth_Forecast,
+         GROWTH80PLUS_2020_2025,
+         GROWTH80PLUS_2025_2030,
+         ANNUAL_POP80_INCR_2020_2025,       
+         ANNUAL_POP80_INCR_2025_2030, 
+         CCRC_Inv_Units,
+         IL_Inv_Units,
+         AL_Inv_Units,
+         MC_Inv_Units,
+         NC_Inv_Units,
+         CCRC_Inv_Penetration_2019,
+         IL_Inv_Penetration_2019,
+         AL_Inv_Penetration_2019,
+         MC_Inv_Penetration_2019,
+         NC_Inv_Penetration_2019,
+         CCRC_Unit_GROWTH_2019_2025,
+         CCRC_Unit_GROWTH_2025_2030,
+         IL_Unit_GROWTH_2019_2025,
+         IL_Unit_GROWTH_2025_2030,     
+         AL_MC_Unit_GROWTH_2019_2025,
+         AL_MC_Unit_GROWTH_2025_2030)
+
+
+## Error checking
+MSA_MASTER_ERROR1 <- MSA_MASTER %>%
+  select(MSA,
+         GEO.id2,
+         CCRC_Inv_Penetration_2019,
+         IL_Inv_Penetration_2019,
+         AL_Inv_Penetration_2019,
+         MC_Inv_Penetration_2019,
+         NC_Inv_Penetration_2019,
+         CCRC_Inv_Penetration_2019HH,
+         IL_Inv_Penetration_2019HH,
+         AL_Inv_Penetration_2019HH,
+         MC_Inv_Penetration_2019HH,
+         NC_Inv_Penetration_2019HH,
+         POP_2019,
+         POP_2020,
+         POP_2025,
+         POP_2030,
+         LocalityPOP_HP_2020,
+         LocalityPOP_HP_2025,       
+         LocalityPOP_HP_2030)
+
+
+write.csv(MSA_MASTER_EXCERPT, file = "MSA_MASTER_EXCERPT.csv")
+write.csv(MSA_MASTER_ERROR1, file = "MSA_MASTER_ERROR1.csv")
+write.csv(MSA_MASTER, file = "MSA_MASTER.csv")
+
+
+
