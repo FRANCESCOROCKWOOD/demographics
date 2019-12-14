@@ -1,8 +1,5 @@
-## Companion document to American Senior Housing Association (ASHA) Special Issues Brief (SIB) titled "Revisiting Senior Living Long-Term Unit Growth Forecast" by Francesco Rockwood (Fall 2019)
-## This R script employs Hamilton-Perry method to forecast population by age-cohort by metropolitan statistical areas (MSA)
-## There are numerous opportunities to improve this script such as
-## ... numerous opportunities to create functions (data cleaning, Hamilton-Perry calcuations, charting)
-## ... more systematic treatment of converting data types
+## See README for general description and comments
+
 
 ########################
 ## Set local environment
@@ -912,8 +909,7 @@ TOTAL_2030 <- CCRC_2030 + IL_2030 + AL_MC_2030
 TOTAL_2030
   
 
-  
-
+ 
 
 ###################################################
 ## Export data
